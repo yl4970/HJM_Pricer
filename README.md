@@ -47,10 +47,10 @@ HJM_pricer/
 └── README.md
 ```
 Next Steps
-	- Caplet payoff calculation from simulated paths
-	- Calibration to real-world market data
-	- Support for swaptions and other HJM-compatible instruments
-	- Benchmark performance against analytical approximations
+- Caplet payoff calculation from simulated paths
+- Calibration to real-world market data
+- Support for swaptions and other HJM-compatible instruments
+- Benchmark performance against analytical approximations
 
 References
 - Martinsky, O. (n.d.). HJM: Heath–Jarrow–Morton model. GitHub repository.
