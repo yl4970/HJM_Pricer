@@ -43,6 +43,10 @@ HJM_pricer/
     ├── volSurface.py          # VolatilitySurface class (factor fitting, local vols)
     ├── drift.py               # HJM drift calculation with optional Musiela term
     ├── MonteCarlo.py          # MCSimulation class for forward rate paths
+├── pricers
+    ├── capfloor_black.py
+├── instruments
+    ├── capfloors.py    
 ├── demo.ipynb                 # demo of how to use the framework
 └── README.md
 ```
