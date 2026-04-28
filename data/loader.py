@@ -2,7 +2,6 @@ from abc import ABC, abstractmethod
 
 import pandas_datareader.data as web
 from datetime import date as dt
-from scipy.interpolate import interp1d
 import pandas as pd
 import numpy as np
 
@@ -18,10 +17,6 @@ logger = setup_logger(__name__)
 class TermStructureLoader(ABC):
     @abstractmethod
     def load(self, sdate:dt, edate:dt, DataFreq: str) -> TermStructureData:
-        pass
-
-    @abstractmethod
-    def build_curve(self, tsd) -> TermStructureData:
         pass
 
 class FREDtsdLoader(TermStructureLoader):
@@ -60,26 +55,26 @@ class FREDtsdLoader(TermStructureLoader):
             self._ow_name = "%s_%s" % (DEFAULT_DATA_SOURCE, self._overwrite_type)
             if not self._overwrite_source:
                 logger.warning(
-                    "Unspecified data source to overwrite, setting to detaul data source: " \
-                    "{DEFAULT_DATA_SOURCE}."
-                    )
+                    f"Unspecified data source to overwrite, setting to default data source: "
+                    f"{DEFAULT_DATA_SOURCE}."
+                )
                 self._ow_name = "%s_%s" % (DEFAULT_DATA_SOURCE, self._overwrite_type)
             elif not self._overwrite_type:
-                    logger.warning(
-                        "Unspecified data type to overwrite; will not overwrite."
-                    )
-                    self._ow_flag, self._ow_name = False, None
+                logger.warning(
+                    "Unspecified data type to overwrite; will not overwrite."
+                )
+                self._ow_flag, self._ow_name = False, None
 
         overwrite_tm = None
         if self._ow_flag:
             try:
                 overwrite_tm = TM[DataFreq][self._ow_name]
-            except ValueError:
+            except KeyError:
                 logger.warning(
-                            "Invalid data source and data type combo to overwrite. " \
-                            f"Got {self._ow_name}, need {list(TM[DataFreq].keys())}, " \
-                            "unable to overwrite."
-                        )
+                    "Invalid data source and data type combo to overwrite. "
+                    f"Got {self._ow_name}, need {list(TM[DataFreq].keys())}, "
+                    "unable to overwrite."
+                )
                 self._ow_flag, self._ow_name = False, None
 
         ow_tmin, ow_tmax = (-1,1e9)
@@ -115,38 +110,8 @@ class FREDtsdLoader(TermStructureLoader):
         values = df.values.astype(float)
 
         return TermStructureData(
-            time=time, 
-            tenors=tenors, 
+            time=time,
+            tenors=tenors,
             values=values
             )
-    
-    def build_curve(self, tsd: TermStructureData):
-        f_interp = interp1d(
-            tsd.tenors,
-            tsd.values,
-            axis=1,
-            kind="linear",
-            fill_value="extrapolate"
-        )
-
-        full_tenors = list(range(
-            tsd.tenors[0], 
-            tsd.tenors[-1]+1
-            )
-        )
-        z = f_interp(full_tenors) 
-        dt = np.diff(full_tenors)
-        
-        fwd_curve = np.empty_like(z.T)
-        fwd_curve[0] = z.T[0]
-        fwd_curve[1:] = (np.diff(z * full_tenors) / dt).T
-        fwd_curve = fwd_curve.T
-
-        fwd = TermStructureData(
-            time = tsd.time,
-            tenors = full_tenors,
-            values = fwd_curve
-        )
-
-        return fwd
         
