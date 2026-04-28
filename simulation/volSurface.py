@@ -5,30 +5,41 @@ from functools import wraps
 from dataclasses import dataclass, field
 from tqdm import tqdm
 
-from alt_volSurface.volatility import PCAResult
+from volatility.pca_result import PCAResult
 
 DateKey = pd.Timestamp
 P = ParamSpec("P")
 
+
+def _top_k_eigh(symmetric: np.ndarray, k: int) -> tuple[np.ndarray, np.ndarray]:
+    s, U = np.linalg.eigh(symmetric)
+    idx = s.argsort()[::-1][:k]
+    return s[idx], U[:, idx]
+
 def vectorize_over_dates(func:Callable[Concatenate[object, DateKey, P], tuple]):
     @wraps(func)
     def wrapper(self, dates:Iterable[object], **kwargs:P.kwargs):
-        sample_output = func(self, dates[0], **kwargs)
-        n_keys = 1
-        if isinstance(sample_output, dict):
-            keys = sample_output.keys()
-            n_keys = len(keys)
-        output_dict = [dict() for _ in range(n_keys)]
+        if len(dates) == 0:
+            return {}
 
-        for date in tqdm(dates):
-            output = func(self, date, **kwargs)
+        def _store(stores, date, output):
             if isinstance(output, dict):
-                for dct, out in zip(output_dict, output):
-                    dct[date] = output[out]
+                for dct, key in zip(stores, output):
+                    dct[date] = output[key]
             else:
-                output_dict[0][date] = output
-    
-        return output_dict[0] if n_keys==1 else tuple(output_dict)
+                stores[0][date] = output
+
+        # Probe the first date once so we can size the output containers, then
+        # iterate over the remainder. This avoids re-running func on dates[0].
+        first = func(self, dates[0], **kwargs)
+        n_keys = len(first) if isinstance(first, dict) else 1
+        stores = [dict() for _ in range(n_keys)]
+        _store(stores, dates[0], first)
+
+        for date in tqdm(dates[1:]):
+            _store(stores, date, func(self, date, **kwargs))
+
+        return stores[0] if n_keys == 1 else tuple(stores)
     return wrapper
 
 @dataclass(slots=True)
@@ -73,10 +84,6 @@ class VolatilitySurface:
         min_windowed_bdays = min(self.windowed_bdays.items())[1]
         if min_windowed_bdays > n_obs:
             raise ValueError(f'Rolling window ({min_windowed_bdays}) exceeds available history ({n_obs}).')
-
-    # @vectorize_over_dates
-    # def _get_localVol(self, DateKey, windowed_fwds) -> pd.DataFrame:
-    #     return Volatility(windowed_fwds[DateKey], self.n_factors)
     
     @vectorize_over_dates
     def _get_fwds_within_window(self, DateKey) -> pd.DataFrame:
@@ -106,15 +113,21 @@ class VolatilitySurface:
         dX = np.diff(df, axis=0)
         dX -= dX.mean(axis=0, keepdims=True)
         m, n = dX.shape
-        if m < n:
-            M = 1/(m-1) * (dX @ dX.T)
-            s, U = np.linalg.eigh(M.astype(float))
-            idx = s.argsort()[::-1][:self.n_factors]
-            s, U = s[idx], U[:, idx]
 
+        if m < n:
+            # Time-domain trick: eig of the (m,m) Gram dominates when tenors > history.
+            gram = (dX @ dX.T).astype(float) / (m - 1)
+            s, U = _top_k_eigh(gram, self.n_factors)
             eps = 1e-18
-            V = (dX.T @ U) / np.sqrt((m-1) * np.maximum(s, eps))
+            V = (dX.T @ U) / np.sqrt((m - 1) * np.maximum(s, eps))
         else:
-            s, V = np.linalg.eigh(np.cov(dX))
+            s, V = _top_k_eigh(np.cov(dX, rowvar=False), self.n_factors)
+
+        # Sign stabilization across rolling windows: anchor the sign at the
+        # max-magnitude tenor so polyfit and the HJM drift don't flip between dates.
+        for k in range(V.shape[1]):
+            if V[np.argmax(np.abs(V[:, k])), k] < 0:
+                V[:, k] *= -1
 
         return PCAResult(V=V, s=s, bdays_in_year=self.bdays_dict[DateKey.year], tenors=self.tenors)
+    
