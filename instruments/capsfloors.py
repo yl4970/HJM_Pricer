@@ -44,4 +44,4 @@ class CapFloor:
         z = abs(F - K) / (sigma * T**0.5) if sigma > 0 and T > 0 else float('inf')
         if F < 0.01 and z < 1.0:
             return "normal"
-        return "lognormal"
+        return "lognormal" 
