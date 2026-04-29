@@ -3,7 +3,7 @@ from typing import Optional
 import warnings
 
 import numpy as np
-from scipy.interpolate import CubicSpline
+from scipy.interpolate import CubicSpline, RBFInterpolator
 
 from data.loader import TermStructureLoader
 from data.term_data import TermStructureData
@@ -91,26 +91,49 @@ def instantaneous_forwards_from_dfs(
         knot_tenors_m: np.ndarray,
         knot_dfs: np.ndarray,
         target_tenors_m: np.ndarray,
+        interp_method: str = "cubic_spline",
 ) -> np.ndarray:
     """
-    Cubic-spline interpolation on log(DF) → instantaneous forwards at target tenors.
-
+    Interpolate log(DF) and differentiate to get instantaneous forwards.
+ 
     f(0, t) = -d/dt ln P(0, t)
-
-    Anchors the spline at (t=0, df=1) by definition. Without this, the natural-BC
-    cubic forces the second derivative to zero at the smallest market knot (1M) —
-    biasing the spline derivative there and propagating ~60 bp errors into every
-    short-end forward. Anchoring moves the boundary to t=0 and ties df(0)≡1.
+ 
+    Anchors at (t=0, df=1) by definition.
+ 
+    Parameters
+    ----------
+    interp_method : str
+        'cubic_spline' — natural cubic spline on log(DF). Analytical derivative
+                          via spline.derivative(). C² smooth forwards.
+        'rbf'          — radial basis function (thin-plate spline) on log(DF).
     """
     knot_yr = np.asarray(knot_tenors_m, dtype=float) / 12.0
     knot_dfs = np.asarray(knot_dfs, dtype=float)
     if knot_yr[0] > 0:
         knot_yr = np.concatenate([[0.0], knot_yr])
         knot_dfs = np.concatenate([[1.0], knot_dfs])
-
+ 
+    log_dfs = np.log(knot_dfs)
     target_yr = np.asarray(target_tenors_m, dtype=float) / 12.0
-    spline = CubicSpline(knot_yr, np.log(knot_dfs), bc_type="natural")
-    return -spline.derivative()(target_yr)
+ 
+    if interp_method == "cubic_spline":
+        spline = CubicSpline(knot_yr, log_dfs, bc_type="natural")
+        return -spline.derivative()(target_yr)
+ 
+    elif interp_method == "rbf":
+        rbf = RBFInterpolator(
+            knot_yr.reshape(-1, 1),
+            log_dfs,
+            kernel="thin_plate_spline",
+        )
+        target_log_dfs = rbf(target_yr.reshape(-1, 1)).ravel()
+        return -np.gradient(target_log_dfs, target_yr)
+ 
+    else:
+        raise ValueError(
+            f"Unknown interp_method '{interp_method}'. "
+            f"Supported: 'cubic_spline', 'rbf'."
+        )
 
 
 def build_forward_curve(
