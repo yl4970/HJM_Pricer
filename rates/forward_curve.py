@@ -22,16 +22,6 @@ def _bootstrap_one_date(
     """
     Bootstrap discount factors at the quoted market tenors for a single date.
 
-    Conventions:
-      - tenors <= SHORT_END_MONTHS: treat the par yield as a continuously-compounded
-        zero rate, so P(t) = exp(-y * t).
-      - tenors > SHORT_END_MONTHS: par yield on a semi-annual coupon UST. Solve
-        P(T) from
-            1 = (Y/2) * sum_{c < T} P(c) + (1 + Y/2) * P(T)
-        where coupon dates fall every 6M. DFs at intermediate coupon dates that
-        are not market knots are interpolated linearly in log(DF) using the
-        already-bootstrapped points.
-
     Returns DFs aligned with the input tenors_m.
     """
     tenors_m = np.asarray(tenors_m, dtype=int)
